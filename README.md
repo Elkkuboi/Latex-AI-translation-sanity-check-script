@@ -10,9 +10,12 @@ A Python tool to enforce mathematical integrity and structural correctness in AI
 ## Installation
 
 1. Clone the repository:
-   ```bash
-   git clone [https://github.com/USERNAME/latex-ai-validator.git](https://github.com/USERNAME/latex-ai-validator.git)
-   cd latex-ai-validator
+   ```
+   bash
+   # Clone the repo into a folder named 'latex-ai-validator'
+   git clone https://github.com/Elkkuboi/Latex-AI-translation-sanity-check-script.git latex-ai-validator
+   cd latex-ai-validator 
+   ```
 
 ## Satus
 Work in progress
