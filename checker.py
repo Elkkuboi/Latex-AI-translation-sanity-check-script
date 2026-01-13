@@ -1,52 +1,94 @@
 #!/usr/bin/env python3
+import re
 import sys
 import argparse
 from colorama import Fore, Style, init
 
-# Alustetaan värit (autoreset nollaa värin aina tulostuksen jälkeen)
 init(autoreset=True)
 
 class LatexChecker:
     def __init__(self, original_path, translated_path):
         self.original_path = original_path
         self.translated_path = translated_path
-        
-        print(f"{Fore.CYAN}--- Tarkistus alkaa ---")
-        
-        # Luetaan tiedostot heti alussa
         self.orig_content = self._read_file(original_path)
         self.trans_content = self._read_file(translated_path)
 
     def _read_file(self, filepath):
-        """Lukee tiedoston ja käsittelee virheet, jos tiedostoa ei löydy."""
         try:
             with open(filepath, 'r', encoding='utf-8') as f:
                 return f.read()
         except FileNotFoundError:
             print(f"{Fore.RED}VIRHE: Tiedostoa '{filepath}' ei löytynyt.")
             sys.exit(1)
-        except Exception as e:
-            print(f"{Fore.RED}VIRHE tiedoston luvussa: {e}")
-            sys.exit(1)
 
-    def check_structure(self):
-        """Tarkistaa, onko aaltosulkeet { } tasapainossa."""
-        print(f"[*] Tarkistetaan rakenteellista eheyttä...")
+    def extract_math_blocks(self, content):
+        """
+        Etsii ja eristää kaikki matemaattiset lohkot ja ympäristöt tekstistä.
+        Palauttaa listan merkkijonoja.
+        """
+        # 1. Poistetaan kommentit (ettei verrata kommentoitua koodia)
+        # Etsitään %-merkki, jota EI edellä kenoviiva (\)
+        content_clean = re.sub(r'(?<!\\)%.*', '', content)
         
-        open_count = self.trans_content.count('{')
-        close_count = self.trans_content.count('}')
+        blocks = []
+
+        # 2. Etsitään inline math: $ ... $
+        # (?<!\\) estää nappaamasta \$ merkkiä (joka on dollarimerkki tekstissä)
+        blocks.extend(re.findall(r'(?<!\\)\$(.*?)(?<!\\)\$', content_clean, re.DOTALL))
+
+        # 3. Etsitään display math: \[ ... \]
+        blocks.extend(re.findall(r'\\\[(.*?)\\\]', content_clean, re.DOTALL))
+
+        # 4. Etsitään kaikki LaTeX-ympäristöt: \begin{...} ... \end{...}
+        # Tämä nappaa equation, align, itemize, jne.
+        # Jos käännöksessä equation muuttuu aligniksi tai katoaa, tämä huomaa sen.
+        # Regex nappaa sisällön talteen.
+        blocks.extend(re.findall(r'\\begin\{.*?\}(.*?)\\end\{.*?\}', content_clean, re.DOTALL))
         
-        if open_count != close_count:
-            print(f"{Fore.RED}[!] KRIITINEN VIRHE: Aaltosulkeet eivät täsmää!")
-            print(f"    Avattu {{ : {open_count} kpl")
-            print(f"    Suljettu }} : {close_count} kpl")
+        # Siivotaan turhat välilyönnit ja rivinvaihdot vertailua varten.
+        # Esim "x + y" on sama kuin "x+y"
+        cleaned_blocks = [b.strip().replace(" ", "").replace("\n", "") for b in blocks]
+        
+        return cleaned_blocks
+
+    def compare_math(self):
+        print(f"{Fore.CYAN}[*] Verrataan matematiikkaa ja ympäristöjä kahden tiedoston välillä...")
+        
+        orig_blocks = self.extract_math_blocks(self.orig_content)
+        trans_blocks = self.extract_math_blocks(self.trans_content)
+        
+        errors = 0
+        
+        # TARKISTUS 1: Määrien vertailu
+        if len(orig_blocks) != len(trans_blocks):
+            print(f"{Fore.RED}[!] KRITITINEN VIRHE: Lohkojen määrä ei täsmää!")
+            print(f"    Alkuperäinen tiedosto: {len(orig_blocks)} kpl")
+            print(f"    Käännetty tiedosto:    {len(trans_blocks)} kpl")
+            print(f"    {Fore.YELLOW}-> Jossain on kadonnut tai ilmestynyt ylimääräinen kaava tai ympäristö.")
+            # Ei lopeteta tähän, vaan yritetään näyttää missä ero on
+            errors += 1
+            
+        # TARKISTUS 2: Sisällön vertailu
+        # Verrataan niin pitkälle kuin lyhyempi lista riittää
+        limit = min(len(orig_blocks), len(trans_blocks))
+        
+        for i in range(limit):
+            if orig_blocks[i] != trans_blocks[i]:
+                print(f"{Fore.YELLOW}[x] Eroavuus lohkossa #{i+1}:")
+                # Näytetään vain 50 ekaa merkkiä ettei floodata ruutua
+                print(f"    Orig:  {orig_blocks[i][:60]}...")
+                print(f"    Trans: {trans_blocks[i][:60]}...")
+                errors += 1
+
+        if errors == 0:
+            print(f"{Fore.GREEN}[+] Kaikki {len(orig_blocks)} matemaattista lohkoa/ympäristöä ovat identtiset.")
+            return True
+        else:
+            print(f"{Fore.RED}[-] Löydettiin yhteensä {errors} virhettä vertailussa.")
             return False
-        
-        print(f"{Fore.GREEN}[+] Rakenne kunnossa.")
-        return True
 
 def main():
-    parser = argparse.ArgumentParser(description="Basic LaTeX Sanity Checker")
+    parser = argparse.ArgumentParser(description="LaTeX Translation Comparator")
     parser.add_argument("original", help="Polku alkuperäiseen .tex tiedostoon")
     parser.add_argument("translated", help="Polku käännettyyn .tex tiedostoon")
     
@@ -54,11 +96,11 @@ def main():
 
     checker = LatexChecker(args.original, args.translated)
     
-    # Ajetaan tarkistus
-    if checker.check_structure():
-        print(f"\n{Fore.GREEN}✔ Perustarkistus läpi.{Style.RESET_ALL}")
+    if checker.compare_math():
+        print(f"\n{Fore.GREEN}✔ VERTAILU OK: Tiedostot vastaavat matemaattisesti toisiaan.{Style.RESET_ALL}")
+        sys.exit(0)
     else:
-        print(f"\n{Fore.RED}✘ Tarkistus epäonnistui.{Style.RESET_ALL}")
+        print(f"\n{Fore.RED}✘ VERTAILU EPÄONNISTUI.{Style.RESET_ALL}")
         sys.exit(1)
 
 if __name__ == "__main__":
